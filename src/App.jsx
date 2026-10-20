@@ -14,6 +14,7 @@ const initialTasks = [
     dueDate: "",
     notes: "Review the layout and responsive design.",
     completed: false,
+    status: "todo",
   },
   {
     id: 2,
@@ -24,6 +25,7 @@ const initialTasks = [
     dueDate: "",
     notes: "Check the README and installation steps.",
     completed: false,
+    status: "todo",
   },
   {
     id: 3,
@@ -34,6 +36,7 @@ const initialTasks = [
     dueDate: "",
     notes: "Practice props, state, and reusable components.",
     completed: true,
+    status: "completed",
   },
 ];
 
@@ -45,6 +48,41 @@ const categories = [
   "Personal",
 ];
 
+const boardColumns = [
+  { id: "todo", title: "To Do", description: "Tasks waiting to start" },
+  {
+    id: "in-progress",
+    title: "In Progress",
+    description: "Tasks currently being worked on",
+  },
+  {
+    id: "completed",
+    title: "Completed",
+    description: "Finished tasks",
+  },
+];
+
+function normalizeTask(task) {
+  const completed = Boolean(task.completed);
+
+  let status = task.status;
+
+  if (completed) {
+    status = "completed";
+  } else if (!["todo", "in-progress"].includes(status)) {
+    status = "todo";
+  }
+
+  return {
+    ...task,
+    category: task.category || "General",
+    notes: task.notes || "",
+    dueDate: task.dueDate || "",
+    completed,
+    status,
+  };
+}
+
 function loadTasks() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -54,13 +92,7 @@ function loadTasks() {
     const parsed = JSON.parse(saved);
 
     return Array.isArray(parsed)
-      ? parsed.map((task) => ({
-          ...task,
-          category: task.category || "General",
-          notes: task.notes || "",
-          dueDate: task.dueDate || "",
-          completed: Boolean(task.completed),
-        }))
+      ? parsed.map(normalizeTask)
       : initialTasks;
   } catch {
     return initialTasks;
@@ -93,6 +125,7 @@ function App() {
   const [showForm, setShowForm] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState(null);
   const [darkMode, setDarkMode] = useState(true);
+  const [viewMode, setViewMode] = useState("list");
 
   const [backupMessage, setBackupMessage] = useState("");
 
@@ -153,6 +186,7 @@ function App() {
         dueDate,
         notes: notes.trim(),
         completed: false,
+        status: "todo",
       };
 
       saveTasks([newTask, ...tasks]);
@@ -176,9 +210,29 @@ function App() {
 
   function toggleTask(id) {
     saveTasks(
+      tasks.map((task) => {
+        if (task.id !== id) return task;
+
+        const completed = !task.completed;
+
+        return {
+          ...task,
+          completed,
+          status: completed ? "completed" : "todo",
+        };
+      })
+    );
+  }
+
+  function moveTask(taskId, newStatus) {
+    saveTasks(
       tasks.map((task) =>
-        task.id === id
-          ? { ...task, completed: !task.completed }
+        task.id === taskId
+          ? {
+              ...task,
+              status: newStatus,
+              completed: newStatus === "completed",
+            }
           : task
       )
     );
@@ -255,13 +309,12 @@ function App() {
           throw new Error("Invalid backup");
         }
 
-        const restoredTasks = imported.map((task) => ({
-          ...task,
-          id: task.id ?? Date.now() + Math.random(),
-          category: task.category || "General",
-          notes: task.notes || "",
-          dueDate: task.dueDate || "",
-        }));
+        const restoredTasks = imported.map((task) =>
+          normalizeTask({
+            ...task,
+            id: task.id ?? Date.now() + Math.random(),
+          })
+        );
 
         if (
           window.confirm(
@@ -318,6 +371,10 @@ function App() {
   ).length;
 
   const activeCount = tasks.length - completedCount;
+
+  const inProgressCount = tasks.filter(
+    (task) => task.status === "in-progress" && !task.completed
+  ).length;
 
   const overdueCount = tasks.filter(isOverdue).length;
 
@@ -385,6 +442,12 @@ function App() {
     if (!date) return "";
 
     return new Date(`${date}T00:00:00`).toLocaleDateString();
+  }
+
+  function confirmDeleteTask(task) {
+    if (window.confirm(`Delete "${task.title}"?`)) {
+      deleteTask(task.id);
+    }
   }
 
   return (
@@ -496,8 +559,8 @@ function App() {
           <article className="stat-card">
             <span className="stat-icon blue">◷</span>
             <p>In Progress</p>
-            <h3>{activeCount}</h3>
-            <span className="stat-note">Tasks to complete</span>
+            <h3>{inProgressCount}</h3>
+            <span className="stat-note">Tasks being worked on</span>
           </article>
 
           <article className="stat-card">
@@ -687,6 +750,32 @@ function App() {
             </form>
           )}
 
+          <div className="view-switch">
+            <button
+              type="button"
+              className={
+                viewMode === "list"
+                  ? "view-button active"
+                  : "view-button"
+              }
+              onClick={() => setViewMode("list")}
+            >
+              ☰ List View
+            </button>
+
+            <button
+              type="button"
+              className={
+                viewMode === "board"
+                  ? "view-button active"
+                  : "view-button"
+              }
+              onClick={() => setViewMode("board")}
+            >
+              ▦ Kanban Board
+            </button>
+          </div>
+
           <div className="task-controls">
             <input
               className="search-input"
@@ -737,103 +826,209 @@ function App() {
             </select>
           </div>
 
-          <div className="task-list">
-            {filteredTasks.length === 0 ? (
-              <div className="empty-state">
-                <span>✓</span>
-                <h3>No tasks found</h3>
-                <p>Add a new task or change your search or filters.</p>
-              </div>
-            ) : (
-              filteredTasks.map((task) => (
-                <article className="task-row" key={task.id}>
-                  <button
-                    className={`task-check ${
-                      task.completed ? "checked" : ""
-                    }`}
-                    onClick={() => toggleTask(task.id)}
-                    aria-label={
-                      task.completed
-                        ? "Mark task incomplete"
-                        : "Mark task complete"
-                    }
-                    title={
-                      task.completed
-                        ? "Mark incomplete"
-                        : "Mark completed"
-                    }
-                  >
-                    {task.completed ? "✓" : ""}
-                  </button>
+          {viewMode === "board" && (
+            <div className="kanban-board">
+              {boardColumns.map((column) => {
+                const columnTasks = filteredTasks.filter((task) => {
+                  const status = task.completed
+                    ? "completed"
+                    : task.status || "todo";
 
-                  <div className="task-details">
-                    <h3 className={task.completed ? "task-done" : ""}>
-                      {task.title}
-                    </h3>
+                  return status === column.id;
+                });
 
-                    <p>
-                      {task.project}
-                      {" · "}
-                      {task.category || "General"}
-                      {task.dueDate && ` · Due ${formatDate(task.dueDate)}`}
-                    </p>
-
-                    {task.notes && (
-                      <p className="task-notes">{task.notes}</p>
-                    )}
-
-                    {isOverdue(task) && (
-                      <span className="overdue-label">Overdue</span>
-                    )}
-
-                    {isUpcoming(task) && (
-                      <span className="upcoming-label">
-                        {task.dueDate === todayString
-                          ? "Due today"
-                          : "Due soon"}
+                return (
+                  <section className="kanban-column" key={column.id}>
+                    <div className="kanban-heading">
+                      <div>
+                        <h3>{column.title}</h3>
+                        <p>{column.description}</p>
+                      </div>
+                      <span className="kanban-count">
+                        {columnTasks.length}
                       </span>
+                    </div>
+
+                    {columnTasks.length === 0 ? (
+                      <div className="kanban-empty">
+                        <span>▦</span>
+                        <p>No tasks here yet</p>
+                      </div>
+                    ) : (
+                      columnTasks.map((task) => (
+                        <article className="kanban-card" key={task.id}>
+                          <div className="kanban-card-top">
+                            <span
+                              className={`priority ${task.priority.toLowerCase()}`}
+                            >
+                              {task.priority}
+                            </span>
+
+                            {isOverdue(task) && (
+                              <span className="overdue-label">
+                                Overdue
+                              </span>
+                            )}
+                          </div>
+
+                          <h4 className={task.completed ? "task-done" : ""}>
+                            {task.title}
+                          </h4>
+
+                          <p className="kanban-project">
+                            {task.project} · {task.category || "General"}
+                          </p>
+
+                          {task.dueDate && (
+                            <p className="kanban-date">
+                              📅 Due {formatDate(task.dueDate)}
+                            </p>
+                          )}
+
+                          {task.notes && (
+                            <p className="kanban-notes">{task.notes}</p>
+                          )}
+
+                          <label className="kanban-status-label">
+                            Move task
+                            <select
+                              value={column.id}
+                              onChange={(event) =>
+                                moveTask(task.id, event.target.value)
+                              }
+                              aria-label={`Move ${task.title}`}
+                            >
+                              <option value="todo">To Do</option>
+                              <option value="in-progress">In Progress</option>
+                              <option value="completed">Completed</option>
+                            </select>
+                          </label>
+
+                          <div className="kanban-actions">
+                            <button
+                              type="button"
+                              className="task-action-button"
+                              onClick={() => editTask(task)}
+                            >
+                              Edit
+                            </button>
+
+                            <button
+                              type="button"
+                              className="delete-button"
+                              onClick={() => confirmDeleteTask(task)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </article>
+                      ))
                     )}
-                  </div>
+                  </section>
+                );
+              })}
+            </div>
+          )}
 
-                  <span
-                    className={`priority ${task.priority.toLowerCase()}`}
-                  >
-                    {task.priority}
-                  </span>
-
-                  <span
-                    className={`status ${
-                      task.completed ? "status-done" : ""
-                    }`}
-                  >
-                    {task.completed ? "Completed" : "In progress"}
-                  </span>
-
-                  <button
-                    className="task-action-button"
-                    onClick={() => editTask(task)}
-                    aria-label={`Edit ${task.title}`}
-                    title="Edit task"
-                  >
-                    Edit
-                  </button>
-
-                  <button
-                    className="delete-button"
-                    onClick={() => {
-                      if (window.confirm("Delete this task?")) {
-                        deleteTask(task.id);
+          {viewMode === "list" && (
+            <div className="task-list">
+              {filteredTasks.length === 0 ? (
+                <div className="empty-state">
+                  <span>✓</span>
+                  <h3>No tasks found</h3>
+                  <p>Add a new task or change your search or filters.</p>
+                </div>
+              ) : (
+                filteredTasks.map((task) => (
+                  <article className="task-row" key={task.id}>
+                    <button
+                      className={`task-check ${
+                        task.completed ? "checked" : ""
+                      }`}
+                      onClick={() => toggleTask(task.id)}
+                      aria-label={
+                        task.completed
+                          ? "Mark task incomplete"
+                          : "Mark task complete"
                       }
-                    }}
-                    aria-label={`Delete ${task.title}`}
-                    title="Delete task"
-                  >
-                    ×
-                  </button>
-                </article>
-              ))
-            )}
-          </div>
+                      title={
+                        task.completed
+                          ? "Mark incomplete"
+                          : "Mark completed"
+                      }
+                    >
+                      {task.completed ? "✓" : ""}
+                    </button>
+
+                    <div className="task-details">
+                      <h3 className={task.completed ? "task-done" : ""}>
+                        {task.title}
+                      </h3>
+
+                      <p>
+                        {task.project}
+                        {" · "}
+                        {task.category || "General"}
+                        {task.dueDate && ` · Due ${formatDate(task.dueDate)}`}
+                      </p>
+
+                      {task.notes && (
+                        <p className="task-notes">{task.notes}</p>
+                      )}
+
+                      {isOverdue(task) && (
+                        <span className="overdue-label">Overdue</span>
+                      )}
+
+                      {isUpcoming(task) && (
+                        <span className="upcoming-label">
+                          {task.dueDate === todayString
+                            ? "Due today"
+                            : "Due soon"}
+                        </span>
+                      )}
+                    </div>
+
+                    <span
+                      className={`priority ${task.priority.toLowerCase()}`}
+                    >
+                      {task.priority}
+                    </span>
+
+                    <span
+                      className={`status ${
+                        task.completed ? "status-done" : ""
+                      }`}
+                    >
+                      {task.completed
+                        ? "Completed"
+                        : task.status === "in-progress"
+                          ? "In Progress"
+                          : "To Do"}
+                    </span>
+
+                    <button
+                      className="task-action-button"
+                      onClick={() => editTask(task)}
+                      aria-label={`Edit ${task.title}`}
+                      title="Edit task"
+                    >
+                      Edit
+                    </button>
+
+                    <button
+                      className="delete-button"
+                      onClick={() => confirmDeleteTask(task)}
+                      aria-label={`Delete ${task.title}`}
+                      title="Delete task"
+                    >
+                      ×
+                    </button>
+                  </article>
+                ))
+              )}
+            </div>
+          )}
 
           <footer className="task-footer">
             Showing {filteredTasks.length} of {tasks.length} tasks
