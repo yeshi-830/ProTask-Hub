@@ -9,6 +9,7 @@ const initialTasks = [
     id: 1,
     title: "Finalize homepage design",
     project: "Website Redesign",
+    category: "Development",
     priority: "High",
     dueDate: "",
     notes: "Review the layout and responsive design.",
@@ -18,6 +19,7 @@ const initialTasks = [
     id: 2,
     title: "Review project documentation",
     project: "ProTask Hub",
+    category: "Work",
     priority: "Medium",
     dueDate: "",
     notes: "Check the README and installation steps.",
@@ -27,6 +29,7 @@ const initialTasks = [
     id: 3,
     title: "Practice React components",
     project: "Learning",
+    category: "Study",
     priority: "Low",
     dueDate: "",
     notes: "Practice props, state, and reusable components.",
@@ -34,17 +37,29 @@ const initialTasks = [
   },
 ];
 
+const categories = [
+  "General",
+  "Development",
+  "Study",
+  "Work",
+  "Personal",
+];
+
 function loadTasks() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
+
     if (!saved) return initialTasks;
 
     const parsed = JSON.parse(saved);
+
     return Array.isArray(parsed)
       ? parsed.map((task) => ({
           ...task,
+          category: task.category || "General",
           notes: task.notes || "",
           dueDate: task.dueDate || "",
+          completed: Boolean(task.completed),
         }))
       : initialTasks;
   } catch {
@@ -52,33 +67,54 @@ function loadTasks() {
   }
 }
 
+function getLocalDateString(date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
 function App() {
   const [tasks, setTasks] = useState(loadTasks);
+
   const [title, setTitle] = useState("");
   const [project, setProject] = useState("");
+  const [category, setCategory] = useState("General");
   const [priority, setPriority] = useState("Medium");
   const [dueDate, setDueDate] = useState("");
   const [notes, setNotes] = useState("");
+
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("All");
+  const [categoryFilter, setCategoryFilter] = useState("All Categories");
   const [sortBy, setSortBy] = useState("newest");
+
   const [showForm, setShowForm] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState(null);
   const [darkMode, setDarkMode] = useState(true);
+
+  const [backupMessage, setBackupMessage] = useState("");
 
   function saveTasks(updatedTasks) {
     setTasks(updatedTasks);
 
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedTasks));
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify(updatedTasks)
+      );
     } catch {
-      // The app continues working if browser storage is unavailable.
+      setBackupMessage(
+        "Could not save to browser storage. Export a backup to protect your tasks."
+      );
     }
   }
 
   function resetForm() {
     setTitle("");
     setProject("");
+    setCategory("General");
     setPriority("Medium");
     setDueDate("");
     setNotes("");
@@ -98,6 +134,7 @@ function App() {
               ...task,
               title: title.trim(),
               project: project.trim() || "General",
+              category,
               priority,
               dueDate,
               notes: notes.trim(),
@@ -111,6 +148,7 @@ function App() {
         id: Date.now(),
         title: title.trim(),
         project: project.trim() || "General",
+        category,
         priority,
         dueDate,
         notes: notes.trim(),
@@ -126,6 +164,7 @@ function App() {
   function editTask(task) {
     setTitle(task.title);
     setProject(task.project);
+    setCategory(task.category || "General");
     setPriority(task.priority);
     setDueDate(task.dueDate || "");
     setNotes(task.notes || "");
@@ -154,7 +193,9 @@ function App() {
   }
 
   function clearCompleted() {
-    const completed = tasks.filter((task) => task.completed).length;
+    const completed = tasks.filter(
+      (task) => task.completed
+    ).length;
 
     if (completed === 0) return;
 
@@ -163,12 +204,97 @@ function App() {
     }
   }
 
+  function exportTasks() {
+    try {
+      const fileContent = JSON.stringify(tasks, null, 2);
+      const blob = new Blob([fileContent], {
+        type: "application/json",
+      });
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      link.href = url;
+      link.download = "protask-hub-backup.json";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      URL.revokeObjectURL(url);
+      setBackupMessage("Your tasks were exported successfully!");
+    } catch {
+      setBackupMessage("Export failed. Please try again.");
+    }
+  }
+
+  function importTasks(event) {
+    const file = event.target.files?.[0];
+
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      try {
+        const imported = JSON.parse(reader.result);
+
+        const validPriorities = ["Low", "Medium", "High"];
+
+        const isValidBackup =
+          Array.isArray(imported) &&
+          imported.every(
+            (task) =>
+              task &&
+              typeof task.title === "string" &&
+              typeof task.project === "string" &&
+              typeof task.completed === "boolean" &&
+              validPriorities.includes(task.priority)
+          );
+
+        if (!isValidBackup) {
+          throw new Error("Invalid backup");
+        }
+
+        const restoredTasks = imported.map((task) => ({
+          ...task,
+          id: task.id ?? Date.now() + Math.random(),
+          category: task.category || "General",
+          notes: task.notes || "",
+          dueDate: task.dueDate || "",
+        }));
+
+        if (
+          window.confirm(
+            "Import this backup? Your current task list will be replaced."
+          )
+        ) {
+          saveTasks(restoredTasks);
+          resetForm();
+          setBackupMessage("Your tasks were restored successfully!");
+        }
+      } catch {
+        setBackupMessage(
+          "Import failed. Please select a valid ProTask Hub JSON backup."
+        );
+      } finally {
+        event.target.value = "";
+      }
+    };
+
+    reader.onerror = () => {
+      setBackupMessage("Could not read this file. Please try again.");
+      event.target.value = "";
+    };
+
+    reader.readAsText(file);
+  }
+
   const today = new Date();
-  const todayString = [
-    today.getFullYear(),
-    String(today.getMonth() + 1).padStart(2, "0"),
-    String(today.getDate()).padStart(2, "0"),
-  ].join("-");
+  const todayString = getLocalDateString(today);
+
+  const upcomingLimit = new Date(today);
+  upcomingLimit.setDate(upcomingLimit.getDate() + 7);
+  const upcomingLimitString = getLocalDateString(upcomingLimit);
 
   function isOverdue(task) {
     return (
@@ -178,9 +304,25 @@ function App() {
     );
   }
 
-  const completedCount = tasks.filter((task) => task.completed).length;
+  function isUpcoming(task) {
+    return (
+      !task.completed &&
+      Boolean(task.dueDate) &&
+      task.dueDate >= todayString &&
+      task.dueDate <= upcomingLimitString
+    );
+  }
+
+  const completedCount = tasks.filter(
+    (task) => task.completed
+  ).length;
+
   const activeCount = tasks.length - completedCount;
+
   const overdueCount = tasks.filter(isOverdue).length;
+
+  const upcomingCount = tasks.filter(isUpcoming).length;
+
   const highPriorityCount = tasks.filter(
     (task) => task.priority === "High" && !task.completed
   ).length;
@@ -191,13 +333,14 @@ function App() {
       : Math.round((completedCount / tasks.length) * 100);
 
   const filteredTasks = useMemo(() => {
-    const result = tasks.filter((task) => {
-      const query = search.toLowerCase();
+    const query = search.toLowerCase();
 
+    const result = tasks.filter((task) => {
       const matchesSearch =
         task.title.toLowerCase().includes(query) ||
         task.project.toLowerCase().includes(query) ||
-        (task.notes || "").toLowerCase().includes(query);
+        (task.notes || "").toLowerCase().includes(query) ||
+        (task.category || "General").toLowerCase().includes(query);
 
       const matchesFilter =
         filter === "All" ||
@@ -206,9 +349,14 @@ function App() {
         (filter === "High Priority" &&
           task.priority === "High" &&
           !task.completed) ||
-        (filter === "Overdue" && isOverdue(task));
+        (filter === "Overdue" && isOverdue(task)) ||
+        (filter === "Upcoming" && isUpcoming(task));
 
-      return matchesSearch && matchesFilter;
+      const matchesCategory =
+        categoryFilter === "All Categories" ||
+        (task.category || "General") === categoryFilter;
+
+      return matchesSearch && matchesFilter && matchesCategory;
     });
 
     return [...result].sort((a, b) => {
@@ -221,6 +369,7 @@ function App() {
         if (!a.dueDate && !b.dueDate) return 0;
         if (!a.dueDate) return 1;
         if (!b.dueDate) return -1;
+
         return a.dueDate.localeCompare(b.dueDate);
       }
 
@@ -230,7 +379,7 @@ function App() {
 
       return b.id - a.id;
     });
-  }, [tasks, search, filter, sortBy, todayString]);
+  }, [tasks, search, filter, categoryFilter, sortBy, todayString]);
 
   function formatDate(date) {
     if (!date) return "";
@@ -287,6 +436,16 @@ function App() {
           <span>!</span> Overdue
           {overdueCount > 0 && (
             <span className="overdue-count">{overdueCount}</span>
+          )}
+        </button>
+
+        <button
+          className={`nav-item ${filter === "Upcoming" ? "active" : ""}`}
+          onClick={() => setFilter("Upcoming")}
+        >
+          <span>📅</span> Upcoming
+          {upcomingCount > 0 && (
+            <span className="overdue-count">{upcomingCount}</span>
           )}
         </button>
 
@@ -379,6 +538,48 @@ function App() {
             <h3>{highPriorityCount}</h3>
             <span className="stat-note">Important unfinished tasks</span>
           </article>
+
+          <article className="stat-card">
+            <span className="stat-icon blue">📅</span>
+            <p>Upcoming Deadlines</p>
+            <h3>{upcomingCount}</h3>
+            <span className="stat-note">Due within seven days</span>
+          </article>
+        </section>
+
+        <section className="backup-section">
+          <div className="section-heading">
+            <div>
+              <h2>Task Backup</h2>
+              <p>Export your tasks or restore a saved backup.</p>
+            </div>
+
+            <div className="form-actions">
+              <button
+                type="button"
+                className="theme-toggle"
+                onClick={exportTasks}
+              >
+                Export JSON
+              </button>
+
+              <label className="primary-button">
+                Import JSON
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={importTasks}
+                  hidden
+                />
+              </label>
+            </div>
+          </div>
+
+          {backupMessage && (
+            <p className="backup-message" role="status" aria-live="polite">
+              {backupMessage}
+            </p>
+          )}
         </section>
 
         <section className="tasks-section">
@@ -423,6 +624,20 @@ function App() {
                   onChange={(event) => setProject(event.target.value)}
                   placeholder="e.g. Website redesign"
                 />
+              </label>
+
+              <label>
+                Category
+                <select
+                  value={category}
+                  onChange={(event) => setCategory(event.target.value)}
+                >
+                  {categories.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               <label>
@@ -492,6 +707,21 @@ function App() {
               <option>Completed</option>
               <option>High Priority</option>
               <option>Overdue</option>
+              <option>Upcoming</option>
+            </select>
+
+            <select
+              className="filter-select"
+              value={categoryFilter}
+              onChange={(event) => setCategoryFilter(event.target.value)}
+              aria-label="Filter by category"
+            >
+              <option>All Categories</option>
+              {categories.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
             </select>
 
             <select
@@ -512,7 +742,7 @@ function App() {
               <div className="empty-state">
                 <span>✓</span>
                 <h3>No tasks found</h3>
-                <p>Add a new task or change your search or filter.</p>
+                <p>Add a new task or change your search or filters.</p>
               </div>
             ) : (
               filteredTasks.map((task) => (
@@ -543,6 +773,8 @@ function App() {
 
                     <p>
                       {task.project}
+                      {" · "}
+                      {task.category || "General"}
                       {task.dueDate && ` · Due ${formatDate(task.dueDate)}`}
                     </p>
 
@@ -552,6 +784,14 @@ function App() {
 
                     {isOverdue(task) && (
                       <span className="overdue-label">Overdue</span>
+                    )}
+
+                    {isUpcoming(task) && (
+                      <span className="upcoming-label">
+                        {task.dueDate === todayString
+                          ? "Due today"
+                          : "Due soon"}
+                      </span>
                     )}
                   </div>
 
